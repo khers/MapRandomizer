@@ -13,6 +13,7 @@ use crate::{
         RandomizerSettings, SkillAssumptionSettings,
     },
 };
+use pyo3::prelude::*;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TechData {
@@ -32,6 +33,8 @@ pub struct NotableData {
     pub video_id: Option<usize>,
 }
 
+#[pyclass]
+#[derive(Clone)]
 pub struct PresetData {
     pub tech_data_map: HashMap<TechId, TechData>,
     pub notable_data_map: HashMap<(RoomId, NotableId), NotableData>,
@@ -44,6 +47,7 @@ pub struct PresetData {
     pub objective_presets: Vec<ObjectiveSettings>,
     pub difficulty_tiers: Vec<DifficultyConfig>,
     pub full_presets: Vec<RandomizerSettings>,
+    #[pyo3(get)]
     pub default_preset: RandomizerSettings,
     pub logic_page_presets: Vec<RandomizerSettings>,
     pub doors_presets: Vec<DoorsSettings>,
@@ -86,7 +90,7 @@ impl PresetData {
         presets_path: &Path,
         game_data: &GameData,
     ) -> Result<Self> {
-        let tech_data_str = std::fs::read_to_string(tech_path)
+        let tech_data_str = game_data.read_to_string(&tech_path)
             .context(format!("reading from {}", tech_path.display()))?;
         let mut tech_data: Vec<TechData> = serde_json::from_str(&tech_data_str)?;
         for d in &mut tech_data {
@@ -101,7 +105,7 @@ impl PresetData {
             .map(|x| (x.tech_id, x))
             .collect();
 
-        let notable_data_str = std::fs::read_to_string(notable_path)
+        let notable_data_str = game_data.read_to_string(&notable_path)
             .context(format!("reading from {}", notable_path.display()))?;
         let mut notable_data: Vec<NotableData> = serde_json::from_str(&notable_data_str)?;
         for d in &mut notable_data {
@@ -152,7 +156,7 @@ impl PresetData {
         let mut difficulty_tiers: Vec<DifficultyConfig> = vec![];
         for name in &skill_preset_names {
             let path = skill_preset_path.join(format!("{name}.json"));
-            let preset_str = std::fs::read_to_string(path.clone())
+            let preset_str = game_data.read_to_string(path.clone().as_path())
                 .context(format!("reading from {}", path.display()))?;
             let preset: SkillAssumptionSettings =
                 serde_json::from_str(&preset_str).context(format!("parsing {}", path.display()))?;
@@ -172,7 +176,7 @@ impl PresetData {
         let mut item_progression_presets: Vec<ItemProgressionSettings> = vec![];
         for name in item_progression_preset_names {
             let path = item_progression_preset_path.join(format!("{name}.json"));
-            let preset_str = std::fs::read_to_string(path.clone())
+            let preset_str = game_data.read_to_string(path.clone().as_path())
                 .context(format!("reading from {}", path.display()))?;
             let preset: ItemProgressionSettings =
                 serde_json::from_str(&preset_str).context(format!("parsing {}", path.display()))?;
@@ -185,7 +189,7 @@ impl PresetData {
         let mut quality_of_life_presets: Vec<QualityOfLifeSettings> = vec![];
         for name in qol_preset_names {
             let path = qol_preset_path.join(format!("{name}.json"));
-            let preset_str = std::fs::read_to_string(path.clone())
+            let preset_str = game_data.read_to_string(path.clone().as_path())
                 .context(format!("reading from {}", path.display()))?;
             let preset: QualityOfLifeSettings =
                 serde_json::from_str(&preset_str).context(format!("parsing {}", path.display()))?;
@@ -206,7 +210,7 @@ impl PresetData {
         let mut objective_presets: Vec<ObjectiveSettings> = vec![];
         for name in objective_preset_names {
             let path = objective_preset_path.join(format!("{name}.json"));
-            let preset_str = std::fs::read_to_string(path.clone())
+            let preset_str = game_data.read_to_string(path.clone().as_path())
                 .context(format!("reading from {}", path.display()))?;
             let preset: ObjectiveSettings =
                 serde_json::from_str(&preset_str).context(format!("parsing {}", path.display()))?;
@@ -237,7 +241,7 @@ impl PresetData {
         let mut full_presets: Vec<RandomizerSettings> = vec![];
         for name in full_preset_names {
             let path = full_preset_path.join(format!("{name}.json"));
-            let preset_str = std::fs::read_to_string(path.clone())
+            let preset_str = game_data.read_to_string(path.clone().as_path())
                 .context(format!("reading from {}", path.display()))?;
             let preset: RandomizerSettings =
                 serde_json::from_str(&preset_str).context(format!("parsing {}", path.display()))?;

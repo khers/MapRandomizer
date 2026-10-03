@@ -10,12 +10,11 @@ use std::cmp::min;
 use std::path::Path;
 
 use crate::patch::glowpatch_writer::write_glowpatch;
-use crate::patch::{Rom, apply_ips_patch, snes2pc, write_credits_big_char};
+use crate::patch::{Rom, apply_ips_patch, snes2pc};
 use maprando_game::{GameData, Map};
 use mosaic::MosaicTheme;
 use retiling::apply_retiling;
 use room_palettes::apply_area_themed_palettes;
-use samus_sprite::SamusSpriteCategory;
 
 struct AllocatorBlock {
     start_addr: usize,
@@ -232,23 +231,23 @@ fn remove_mother_brain_flashing(rom: &mut Rom) -> Result<()> {
 fn apply_custom_samus_sprite(
     rom: &mut Rom,
     settings: &CustomizeSettings,
-    samus_sprite_categories: &[SamusSpriteCategory],
+    //samus_sprite_categories: &[SamusSpriteCategory],
 ) -> Result<()> {
-    if settings.samus_sprite.is_some() || !settings.vanilla_screw_attack_animation {
-        let sprite_name = settings
-            .samus_sprite
-            .clone()
-            .unwrap_or("samus_vanilla".to_string());
-        let patch_path_str = format!("../patches/samus_sprites/{sprite_name}.ips");
-        apply_ips_patch(rom, Path::new(&patch_path_str))?;
+    // if settings.samus_sprite.is_some() || !settings.vanilla_screw_attack_animation {
+    //     let sprite_name = settings
+    //         .samus_sprite
+    //         .clone()
+    //         .unwrap_or("samus_vanilla".to_string());
+    //     let patch_path_str = format!("../patches/samus_sprites/{sprite_name}.ips");
+    //     apply_ips_patch(rom, Path::new(&patch_path_str))?;
 
         if settings.vanilla_screw_attack_animation {
             // Disable spin attack animation, to make it behave like vanilla: Screw attack animation will look like
             // you have Space Jump even if you don't:
             rom.write_u16(snes2pc(0x9B93FE), 0)?;
         }
-    }
-
+    // }
+/*
     // Patch credits to give credit to the sprite author:
     if let Some(sprite_name) = settings.samus_sprite.as_ref() {
         for category in samus_sprite_categories {
@@ -296,7 +295,7 @@ fn apply_custom_samus_sprite(
             }
         }
     }
-
+*/
     Ok(())
 }
 
@@ -351,7 +350,7 @@ fn get_button_list_mask(buttons: &[ControllerButton]) -> isize {
     mask
 }
 
-fn apply_controller_config(rom: &mut Rom, controller_config: &ControllerConfig) -> Result<()> {
+fn apply_controller_config(rom: &mut Rom, controller_config: &ControllerConfig, game_data: &GameData) -> Result<()> {
     let control_data = vec![
         (0x81B325, controller_config.jump, ControllerButton::A),
         (0x81B32B, controller_config.dash, ControllerButton::B),
@@ -377,7 +376,7 @@ fn apply_controller_config(rom: &mut Rom, controller_config: &ControllerConfig) 
     rom.write_u16(snes2pc(0x82FE7E), quick_reload_mask)?;
 
     if controller_config.moonwalk {
-        apply_ips_patch(rom, Path::new("../patches/ips/enable_moonwalk.ips"))?;
+        apply_ips_patch(rom, Path::new("worlds/sm_map_rando/data/patches/ips/enable_moonwalk.ips"), game_data)?;
     }
     // $82FE7E
 
@@ -507,7 +506,7 @@ pub fn customize_rom(
     map: &Map,
     settings: &CustomizeSettings,
     game_data: &GameData,
-    samus_sprite_categories: &[SamusSpriteCategory],
+    //samus_sprite_categories: &[SamusSpriteCategory],
     mosaic_themes: &[MosaicTheme],
 ) -> Result<()> {
     remove_mother_brain_flashing(rom)?;
@@ -531,7 +530,7 @@ pub fn customize_rom(
     match settings.door_theme {
         DoorTheme::Vanilla => {}
         DoorTheme::Alternate => {
-            apply_ips_patch(rom, Path::new("../patches/ips/alternate_door_colors.ips"))?;
+            apply_ips_patch(rom, Path::new("worlds/sm_map_rando/data/patches/ips/alternate_door_colors.ips"), game_data)?;
         }
     }
 
@@ -551,7 +550,7 @@ pub fn customize_rom(
     // customized HUD colors which would get messed up.
     rom.write_u16(snes2pc(0xA7DC6E), 0x0040)?;
 
-    apply_custom_samus_sprite(rom, settings, samus_sprite_categories)?;
+    apply_custom_samus_sprite(rom, settings)?;
     if let Some((r, g, b)) = settings.etank_color {
         let color = (r as isize) | ((g as isize) << 5) | ((b as isize) << 10);
         rom.write_u16(snes2pc(0x82FFFE), color)?; // Gameplay ETank color
@@ -559,7 +558,7 @@ pub fn customize_rom(
         rom.write_u16(snes2pc(0xA7CA7B), color)?; // During Phantoon power-on
     }
     if settings.reserve_hud_style {
-        apply_ips_patch(rom, Path::new("../patches/ips/reserve_hud.ips"))?;
+        apply_ips_patch(rom, Path::new("worlds/sm_map_rando/data/patches/ips/reserve_hud.ips"), game_data)?;
     }
     if settings.room_names {
         rom.write_u16(snes2pc(0x82FFFA), 1)?;
@@ -622,13 +621,13 @@ pub fn customize_rom(
     }
     match settings.flashing {
         FlashingSetting::Vanilla => {
-            apply_ips_patch(rom, Path::new("../patches/ips/flashing_placebo.ips"))?;
+            apply_ips_patch(rom, Path::new("worlds/sm_map_rando/data/patches/ips/flashing_placebo.ips"), game_data)?;
         }
         FlashingSetting::Reduced => {
-            apply_ips_patch(rom, Path::new("../patches/ips/flashing_placebo.ips"))?;
+            apply_ips_patch(rom, Path::new("worlds/sm_map_rando/data/patches/ips/flashing_placebo.ips"), game_data)?;
             write_glowpatch(rom, &game_data.reduced_flashing_patch)?;
         }
     }
-    apply_controller_config(rom, &settings.controller_config)?;
+    apply_controller_config(rom, &settings.controller_config, game_data)?;
     Ok(())
 }

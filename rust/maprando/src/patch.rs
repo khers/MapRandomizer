@@ -257,97 +257,9 @@ pub fn xy_to_explored_bit_ptr(x: isize, y: isize) -> (isize, u8) {
     (offset_byte_part, offset_bitmask)
 }
 
-fn item_to_plm_type(item: Item, orig_plm_type: isize) -> isize {
-    let item_id = item as isize;
-
-    // Item container: 0 = none, 1 = chozo orb, 2 = shot block (scenery)
-    let item_container = (orig_plm_type - 0xEED7) / 84;
-
-    let plm_table: [[isize; 25]; 3] = [
-        [
-            0xEED7, // Energy tank
-            0xEEDB, // Missile tank
-            0xEEDF, // Super missile tank
-            0xEEE3, // Power bomb tank
-            0xEEE7, // Bombs
-            0xEEEB, // Charge beam
-            0xEEEF, // Ice beam
-            0xEEF3, // Hi-jump
-            0xEEF7, // Speed booster
-            0xEEFB, // Wave beam
-            0xEEFF, // Spazer beam
-            0xEF03, // Spring ball
-            0xEF07, // Varia suit
-            0xEF0B, // Gravity suit
-            0xEF0F, // X-ray scope
-            0xEF13, // Plasma beam
-            0xEF17, // Grapple beam
-            0xEF1B, // Space jump
-            0xEF1F, // Screw attack
-            0xEF23, // Morph ball
-            0xEF27, // Reserve tank
-            0xF000, // Wall-jump boots
-            0xEEDB, // Missile tank (nothing)
-            0xF0E2, // Spark Booster
-            0xF0EE, // Blue Booster
-        ],
-        [
-            0xEF2B, // Energy tank, chozo orb
-            0xEF2F, // Missile tank, chozo orb
-            0xEF33, // Super missile tank, chozo orb
-            0xEF37, // Power bomb tank, chozo orb
-            0xEF3B, // Bombs, chozo orb
-            0xEF3F, // Charge beam, chozo orb
-            0xEF43, // Ice beam, chozo orb
-            0xEF47, // Hi-jump, chozo orb
-            0xEF4B, // Speed booster, chozo orb
-            0xEF4F, // Wave beam, chozo orb
-            0xEF53, // Spazer beam, chozo orb
-            0xEF57, // Spring ball, chozo orb
-            0xEF5B, // Varia suit, chozo orb
-            0xEF5F, // Gravity suit, chozo orb
-            0xEF63, // X-ray scope, chozo orb
-            0xEF67, // Plasma beam, chozo orb
-            0xEF6B, // Grapple beam, chozo orb
-            0xEF6F, // Space jump, chozo orb
-            0xEF73, // Screw attack, chozo orb
-            0xEF77, // Morph ball, chozo orb
-            0xEF7B, // Reserve tank, chozo orb
-            0xF004, // Wall-jump boots, chozo orb
-            0xEF2F, // Missile tank (nothing)
-            0xF0E6, // Spark Booster, chozo orb
-            0xF0F2, // Blue Booster, chozo orb
-        ],
-        [
-            0xEF7F, // Energy tank, shot block
-            0xEF83, // Missile tank, shot block
-            0xEF87, // Super missile tank, shot block
-            0xEF8B, // Power bomb tank, shot block
-            0xEF8F, // Bombs, shot block
-            0xEF93, // Charge beam, shot block
-            0xEF97, // Ice beam, shot block
-            0xEF9B, // Hi-jump, shot block
-            0xEF9F, // Speed booster, shot block
-            0xEFA3, // Wave beam, shot block
-            0xEFA7, // Spazer beam, shot block
-            0xEFAB, // Spring ball, shot block
-            0xEFAF, // Varia suit, shot block
-            0xEFB3, // Gravity suit, shot block
-            0xEFB7, // X-ray scope, shot block
-            0xEFBB, // Plasma beam, shot block
-            0xEFBF, // Grapple beam, shot block
-            0xEFC3, // Space jump, shot block
-            0xEFC7, // Screw attack, shot block
-            0xEFCB, // Morph ball, shot block
-            0xEFCF, // Reserve tank, shot block
-            0xF008, // Wall-jump boots, shot block
-            0xEF83, // Missile tank (nothing)
-            0xF0EA, // Spark Booster, shot block
-            0xF0F6, // Blue Booster, shot block
-        ],
-    ];
-
-    plm_table[item_container as usize][item_id as usize]
+fn item_to_plm_type(_item: Item, orig_plm_type: isize) -> isize {
+    // AP base patch archipelago_{visible,chozo,hidden}_item_plm ($84:F4A0); keep in sync with SMBasepatch maprando main.asm
+    0xF4A0 + 4 * (((orig_plm_type - 0xEED7) / 4) / 21)
 }
 
 fn write_credits_big_letter(rom: &mut Rom, letter: char, addr: usize) -> Result<()> {
@@ -403,8 +315,8 @@ pub fn get_room_state_ptrs(rom: &Rom, room_ptr: usize) -> Result<Vec<(usize, usi
     }
 }
 
-pub fn apply_ips_patch(rom: &mut Rom, patch_path: &Path) -> Result<()> {
-    let patch_data = std::fs::read(patch_path)
+pub fn apply_ips_patch(rom: &mut Rom, patch_path: &Path, game_data: &GameData) -> Result<()> {
+    let patch_data = game_data.read_to_bytes(patch_path)
         .with_context(|| format!("Unable to read patch {}", patch_path.display()))?;
     let patch = ips::Patch::parse(&patch_data)
         .with_context(|| format!("Unable to parse patch {}", patch_path.display()))?;
@@ -414,8 +326,12 @@ pub fn apply_ips_patch(rom: &mut Rom, patch_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn apply_orig_ips_patches(rom: &mut Rom, settings: &RandomizerSettings) -> Result<()> {
-    let patches_dir = Path::new("../patches/ips/");
+fn apply_orig_ips_patches(
+    rom: &mut Rom,
+    settings: &RandomizerSettings,
+    game_data: &GameData,
+) -> Result<()> {
+    let patches_dir = Path::new("worlds/sm_map_rando/data/patches/ips/");
     let mut patches: Vec<&'static str> = vec!["mb_barrier_clear", "mb_left_entrance", "gray_doors"];
     patches.push("hud_expansion_opaque");
 
@@ -429,7 +345,7 @@ fn apply_orig_ips_patches(rom: &mut Rom, settings: &RandomizerSettings) -> Resul
 
     for patch_name in patches {
         let patch_path = patches_dir.join(patch_name.to_string() + ".ips");
-        apply_ips_patch(rom, &patch_path)?;
+        apply_ips_patch(rom, &patch_path, game_data)?;
     }
 
     Ok(())
@@ -438,7 +354,7 @@ fn apply_orig_ips_patches(rom: &mut Rom, settings: &RandomizerSettings) -> Resul
 impl Patcher<'_> {
     fn apply_ips_patches(&mut self) -> Result<()> {
         self.rom.data.resize(0x400000, 0);
-        let patches_dir = Path::new("../patches/ips/");
+        let patches_dir = Path::new("worlds/sm_map_rando/data/patches/ips/");
         let mut patches = vec![
             "complementary_suits",
             "disable_map_icons",
@@ -682,7 +598,7 @@ impl Patcher<'_> {
         if self.settings.quality_of_life_settings.momentum_conservation {
             patches.push("momentum_conservation");
         }
-
+        /*
         match self.settings.quality_of_life_settings.fanfares {
             Fanfares::Vanilla => {
                 if self.settings.quality_of_life_settings.fast_saves {
@@ -700,6 +616,8 @@ impl Patcher<'_> {
                 patches.push("itemsounds");
             }
         }
+        */
+        patches.push("itemsounds");
 
         match self.settings.quality_of_life_settings.enemy_drops {
             EnemyDrops::Off => {
@@ -745,7 +663,7 @@ impl Patcher<'_> {
 
         for patch_name in patches {
             let patch_path = patches_dir.join(patch_name.to_string() + ".ips");
-            apply_ips_patch(self.rom, &patch_path)?;
+            apply_ips_patch(self.rom, &patch_path, self.game_data)?;
         }
 
         // Write settings flags, e.g. for use by auto-tracking tools:
@@ -1916,7 +1834,7 @@ impl Patcher<'_> {
                 info!("Failed title screen randomization: {}", e);
                 continue;
             }
-            title_patcher.patch_title_foreground()?;
+            title_patcher.patch_title_foreground(self.game_data)?;
             title_patcher.patch_title_gradient()?;
             title_patcher.patch_title_blue_light()?;
             println!(
@@ -2176,6 +2094,7 @@ impl Patcher<'_> {
             .enumerate()
         {
             let raw_name = Item::VARIANTS[item_info.item as usize].to_string();
+            info!("credits={} {}", item_info.item as usize, raw_name);
             let item_name = item_display_name_map[&raw_name].clone();
             let item_idx = item_name_index[&raw_name];
             match item_info.step {
@@ -3623,12 +3542,12 @@ pub fn make_rom(
     customize_settings: &CustomizeSettings,
     randomization: &Randomization,
     game_data: &GameData,
-    samus_sprite_categories: &[SamusSpriteCategory],
+    // samus_sprite_categories: &[SamusSpriteCategory],
     mosaic_themes: &[MosaicTheme],
 ) -> Result<Rom> {
     let mut orig_rom = base_rom.clone();
     // clear_free_space(&mut orig_rom)?;
-    apply_orig_ips_patches(&mut orig_rom, randomizer_settings)?;
+    apply_orig_ips_patches(&mut orig_rom, randomizer_settings, game_data)?;
 
     // Remove solid wall that spawns in Tourian Escape Room 1 while coming through right door.
     // Note that this wall spawns in two ways: 1) as a normal PLM which spawns when entering through either door
@@ -3724,7 +3643,7 @@ pub fn make_rom(
         &randomization.map,
         customize_settings,
         game_data,
-        samus_sprite_categories,
+    //  samus_sprite_categories,
         mosaic_themes,
     )?;
 

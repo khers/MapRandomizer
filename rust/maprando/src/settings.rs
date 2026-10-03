@@ -4,11 +4,13 @@ use anyhow::{Context, Result, bail};
 use hashbrown::HashMap;
 use maprando_game::{Item, NotableId, RoomId, TechId};
 use serde::{Deserialize, Serialize};
+use pyo3::prelude::*;
 
 use crate::preset::PresetData;
 
 const VERSION: usize = include!("../../VERSION");
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct RandomizerSettings {
     pub version: usize,
@@ -26,6 +28,7 @@ pub struct RandomizerSettings {
     pub debug: bool,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct DoorsSettings {
     pub preset: Option<String>,
@@ -69,6 +72,7 @@ pub struct SkillAssumptionSettings {
     pub notable_settings: Vec<NotableSetting>,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct TechSetting {
     pub id: TechId,
@@ -76,6 +80,7 @@ pub struct TechSetting {
     pub enabled: bool,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct NotableSetting {
     pub room_id: RoomId,
@@ -85,6 +90,7 @@ pub struct NotableSetting {
     pub enabled: bool,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct ItemProgressionSettings {
     pub preset: Option<String>,
@@ -250,30 +256,35 @@ impl MapPreset {
     }
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct ItemCount {
     pub item: Item,
     pub count: usize,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct KeyItemPrioritySetting {
     pub item: Item,
     pub priority: KeyItemPriority,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct FillerItemPrioritySetting {
     pub item: Item,
     pub priority: FillerItemPriority,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum ItemPoolPreset {
     Full,
     Reduced,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum StartingItemsPreset {
     None,
@@ -300,6 +311,7 @@ impl Display for EnemyDrops {
     }
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct QualityOfLifeSettings {
     pub preset: Option<String>,
@@ -488,6 +500,7 @@ pub struct EnhancedMapSettings {
     pub refill_station: EnhancedMapOther,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub enum Objective {
     Kraid,
@@ -538,6 +551,7 @@ impl Objective {
     }
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub enum ObjectiveSetting {
     No,
@@ -545,18 +559,21 @@ pub enum ObjectiveSetting {
     Yes,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct ObjectiveOption {
     pub objective: Objective,
     pub setting: ObjectiveSetting,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub enum ObjectiveScreen {
     Disabled,
     Enabled,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct ObjectiveSettings {
     pub preset: Option<String>,
@@ -635,6 +652,7 @@ pub fn get_objective_groups() -> Vec<ObjectiveGroup> {
     ]
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct StartLocationSettings {
     pub mode: StartLocationMode,
@@ -642,6 +660,7 @@ pub struct StartLocationSettings {
     pub node_id: Option<usize>,
 }
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct OtherSettings {
     pub wall_jump: WallJump,
@@ -657,6 +676,7 @@ pub struct OtherSettings {
     pub random_seed: Option<usize>,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum ProgressionRate {
     Slow,
@@ -664,6 +684,7 @@ pub enum ProgressionRate {
     Fast,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum ItemPlacementStyle {
     Neutral,
@@ -671,12 +692,14 @@ pub enum ItemPlacementStyle {
     Local,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum ItemPriorityStrength {
     Moderate,
     Heavy,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Hash, Eq, Default)]
 pub enum KeyItemPriority {
     Early,
@@ -685,6 +708,7 @@ pub enum KeyItemPriority {
     Late,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum FillerItemPriority {
     No,
@@ -693,12 +717,14 @@ pub enum FillerItemPriority {
     Early,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum DoorLocksSize {
     Small,
     Large,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum ItemMarkers {
     Simple,
@@ -710,6 +736,7 @@ pub enum ItemMarkers {
     FourTiered,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum Fanfares {
     Vanilla,
@@ -717,6 +744,7 @@ pub enum Fanfares {
     Off,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum ObjectivesMode {
     None,
@@ -728,6 +756,7 @@ pub enum ObjectivesMode {
     Random,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum DoorsMode {
     Blue,
@@ -735,6 +764,7 @@ pub enum DoorsMode {
     Beam,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum StartLocationMode {
     Ship,
@@ -743,6 +773,7 @@ pub enum StartLocationMode {
     Custom,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum AreaAssignmentPreset {
     Standard,
@@ -751,6 +782,7 @@ pub enum AreaAssignmentPreset {
     Random,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum AreaAssignmentBaseOrder {
     Size,
@@ -876,12 +908,14 @@ pub enum WallJump {
     Collectible,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum SpeedBooster {
     Vanilla,
     Split,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum ETankRefill {
     Disabled,
@@ -889,6 +923,7 @@ pub enum ETankRefill {
     Full,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum SaveAnimals {
     No,
@@ -897,6 +932,7 @@ pub enum SaveAnimals {
     Random,
 }
 
+#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq)]
 pub enum MotherBrainFight {
     Vanilla,

@@ -17,6 +17,7 @@ use maprando_game::{
 
 use super::{Rom, snes2pc, xy_to_explored_bit_ptr, xy_to_map_offset};
 use anyhow::{Context, Result, bail};
+use log::info;
 
 pub type TilemapOffset = u16;
 pub type TilemapWord = u16;
@@ -1481,23 +1482,23 @@ pub fn get_item_interior(item: Item, settings: &RandomizerSettings) -> MapTileIn
     match settings.quality_of_life_settings.item_markers {
         ItemMarkers::Simple => MapTileInterior::Item,
         ItemMarkers::Majors => {
-            if item.is_unique() || item == Item::ETank || item == Item::ReserveTank {
+            if item.is_unique() || item == Item::ETank || item == Item::ReserveTank || item == Item::ArchipelagoProgItem {
                 MapTileInterior::MajorItem
             } else {
                 MapTileInterior::Item
             }
         }
         ItemMarkers::Uniques => {
-            if item.is_unique() {
+            if item.is_unique() || item == Item::ArchipelagoProgItem {
                 MapTileInterior::MajorItem
             } else {
                 MapTileInterior::Item
             }
         }
         ItemMarkers::ThreeTiered => {
-            if item.is_unique() {
+            if item.is_unique() || item == Item::ArchipelagoProgItem {
                 MapTileInterior::MajorItem
-            } else if item != Item::Missile && item != Item::Nothing {
+            } else if item != Item::Missile && item != Item::Nothing && item != Item::ArchipelagoItem {
                 MapTileInterior::MediumItem
             } else {
                 MapTileInterior::Item
@@ -1506,12 +1507,12 @@ pub fn get_item_interior(item: Item, settings: &RandomizerSettings) -> MapTileIn
         ItemMarkers::FourTiered => {
             if item.is_unique() {
                 MapTileInterior::MajorItem
-            } else if item == Item::ETank || item == Item::ReserveTank {
+            } else if item == Item::ETank || item == Item::ReserveTank || item == Item::ArchipelagoProgItem {
                 MapTileInterior::MediumItem
-            } else if item == Item::Super || item == Item::PowerBomb {
+            } else if item == Item::Super || item == Item::PowerBomb || item == Item::ArchipelagoUsefulItem {
                 MapTileInterior::AmmoItem
             } else {
-                assert!(item == Item::Missile || item == Item::Nothing);
+                assert!(item == Item::Missile || item == Item::Nothing || item == Item::ArchipelagoItem);
                 MapTileInterior::Item
             }
         }
@@ -2666,6 +2667,9 @@ impl<'a> MapPatcher<'a> {
 
     fn indicate_items(&mut self) -> Result<()> {
         for (i, &item) in self.randomization.item_placement.iter().enumerate() {
+            let room_name = self.game_data.room_json_map[&self.game_data.item_locations[i].0]["name"].to_string();
+            let location_name = self.game_data.node_json_map[&self.game_data.item_locations[i]]["name"].to_string();
+            info!("indicate_items {i} {room_name} {location_name} {:?}", item);
             let (room_id, node_id) = self.game_data.item_locations[i];
             let room_ptr = self.game_data.room_ptr_by_id[&room_id];
             let room_idx = self.game_data.room_idx_by_ptr[&room_ptr];

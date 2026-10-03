@@ -19,3 +19,4 @@ E540 - E54F: ; hud_expansion_opaque.asm
 E580 - E643: ; samus_tiles_optim_animated_tiles_fix.asm
 E660 - E676: ; load_flash_suit.asm
 E680 - E692: ; load_blue_suit.asm
+E700 - EB3C: AP base patch (multiworld.asm and itemextras.asm)

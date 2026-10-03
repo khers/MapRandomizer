@@ -54,6 +54,7 @@ use std::cell::RefCell;
 use std::{cmp::min, convert::TryFrom, hash::Hash, iter, time::SystemTime};
 use strum::VariantNames;
 
+use pyo3::prelude::*;
 // Once there are fewer than 20 item locations remaining to be filled, key items will be
 // placed as quickly as possible. This helps prevent generation failures particularly on lower
 // difficulty settings where some item locations may never be accessible (e.g. Main Street Missile).
@@ -352,6 +353,7 @@ pub struct RandomizationState {
     pub step_num: usize,
     pub start_location: StartLocation,
     pub hub_location: HubLocation,
+    pub first_item_idx: Vec<usize>,
     pub item_precedence: Vec<Item>, // An ordering of the 21 distinct item names. The game will prioritize placing key items earlier in the list.
     pub save_location_state: Vec<SaveLocationState>,
     pub item_location_state: Vec<ItemLocationState>, // Corresponds to GameData.item_locations (one record for each of 100 item locations)
@@ -364,32 +366,44 @@ pub struct RandomizationState {
 }
 
 // Info about an item used during ROM patching, to show info in the credits
-#[derive(Serialize, Deserialize, Debug)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EssentialItemSpoilerInfo {
+    #[pyo3(get, set)]
     pub item: Item,
+    #[pyo3(get, set)]
     pub step: Option<usize>,
+    #[pyo3(get, set)]
     pub area: Option<String>,
 }
 // Spoiler data that is used during ROM patching (e.g. to show info in the credits)
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct EssentialSpoilerData {
+    #[pyo3(get, set)]
     pub item_spoiler_info: Vec<EssentialItemSpoilerInfo>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Randomization {
     pub objectives: Vec<Objective>,
     pub save_animals: SaveAnimals,
+    #[pyo3(get)]
     pub map: Map,
     pub toilet_intersections: Vec<RoomGeometryRoomIdx>,
     pub locked_doors: Vec<LockedDoor>,
+    #[pyo3(get, set)]
     pub item_placement: Vec<Item>,
     pub start_location: StartLocation,
     pub escape_time_seconds: f32,
+    #[pyo3(get, set)]
     pub essential_spoiler_data: EssentialSpoilerData,
     pub seed: usize,
     pub display_seed: usize,
     pub seed_name: String,
+    #[pyo3(get)]
+    pub first_item_idx: Vec<usize>,
 }
 
 struct SelectItemsOutput {
@@ -402,6 +416,7 @@ pub struct StartLocationData {
     pub hub_location: HubLocation,
     pub hub_obtain_route: Vec<SpoilerRouteEntry>,
     pub hub_return_route: Vec<SpoilerRouteEntry>,
+    pub first_item_idx: Vec<usize>,
 }
 
 pub fn randomize_map_areas(map: &mut Map, seed: usize) {
@@ -4505,6 +4520,7 @@ impl<'r> Randomizer<'r> {
             step_num: state.step_num + 1,
             start_location: state.start_location.clone(),
             hub_location: state.hub_location.clone(),
+            first_item_idx: state.first_item_idx.clone(),
             item_precedence: state.item_precedence.clone(),
             item_location_state: state.item_location_state.clone(),
             flag_location_state: state.flag_location_state.clone(),
@@ -4796,7 +4812,7 @@ impl<'r> Randomizer<'r> {
 
         // Include unplaced items at the end:
         for &name in Item::VARIANTS {
-            if name == "Nothing" {
+            if name == "Nothing" || name == "ArchipelagoItem" || name == "ArchipelagoProgItem" || name == "ArchipelagoUsefulItem" || name == "ArchipelagoUsefulProgItem"{
                 continue;
             }
             if settings.other_settings.wall_jump != WallJump::Collectible && name == "WallJump" {
@@ -4916,6 +4932,7 @@ impl<'r> Randomizer<'r> {
             display_seed,
             seed_name: self.get_seed_name(seed),
             start_location: state.start_location.clone(),
+            first_item_idx: state.first_item_idx.clone(),
         };
         Ok((randomization, spoiler_log))
     }
@@ -5020,6 +5037,7 @@ impl<'r> Randomizer<'r> {
         num_attempts: usize,
         rng: &mut R,
         traverser_pair: &mut TraverserPair,
+        group_first_item_idx: &[usize],
     ) -> Result<StartLocationData> {
         let cost_config = simple_cost_config();
 
@@ -5045,11 +5063,13 @@ impl<'r> Randomizer<'r> {
                 hub_location: ship_hub,
                 hub_obtain_route: vec![],
                 hub_return_route: vec![],
+                first_item_idx: vec![],
             });
         }
 
         for i in 0..num_attempts {
             info!("[attempt {attempt_num_rando}] start location attempt {i}");
+            let mut first_item_idx = vec![];
             let start_loc_idx = match self.settings.start_location_settings.mode {
                 StartLocationMode::Random => rng.gen_range(0..self.game_data.start_locations.len()),
                 StartLocationMode::Custom => {
@@ -5125,10 +5145,26 @@ impl<'r> Randomizer<'r> {
             let forward = &traverser_pair.forward;
 
             let mut has_reachable_item = false;
-            for &v in self.game_data.item_vertex_ids.iter().flatten() {
-                if !forward.lsr[v].local.is_empty() {
-                    has_reachable_item = true;
+            for (item_id, vertex_ids) in self.game_data.item_vertex_ids.iter().enumerate() {
+                if !vertex_ids.iter().any(|&v| !forward.lsr[v].local.is_empty()) {
+                    continue;
                 }
+                // AP: reject start locations whose first reachable item another world already uses.
+                if group_first_item_idx.contains(&item_id) {
+                    has_reachable_item = false;
+                    break;
+                }
+                first_item_idx.push(item_id);
+                has_reachable_item = true;
+                let room_name = self.game_data.room_json_map
+                    [&self.game_data.item_locations[item_id].0]["name"]
+                    .to_string();
+                let location_name = self.game_data.node_json_map
+                    [&self.game_data.item_locations[item_id]]["name"]
+                    .to_string();
+                info!(
+                    "[attempt {attempt_num_rando}] start location attempt {i} first_item_idx {item_id} {room_name} {location_name}"
+                );
             }
             if !has_reachable_item {
                 traverser_pair.forward.pop_step();
@@ -5227,6 +5263,7 @@ impl<'r> Randomizer<'r> {
                 hub_location,
                 hub_obtain_route,
                 hub_return_route,
+                first_item_idx,
             });
         }
         bail!("[attempt {attempt_num_rando}] Failed to find start location.")
@@ -5406,6 +5443,7 @@ impl<'r> Randomizer<'r> {
             seed_name: self.get_seed_name(seed),
             display_seed,
             start_location: StartLocation::default(),
+            first_item_idx: vec![],
         };
         Ok((randomization, spoiler_log))
     }
@@ -5427,6 +5465,7 @@ impl<'r> Randomizer<'r> {
         seed: usize,
         display_seed: usize,
         rebuild_traversals: bool,
+        group_first_item_idx: &[usize],
     ) -> Result<(Randomization, SpoilerLog)> {
         let mut rng_seed = [0u8; 32];
         rng_seed[..8].copy_from_slice(&seed.to_le_bytes());
@@ -5460,7 +5499,7 @@ impl<'r> Randomizer<'r> {
         let num_attempts_start_location = if self.game_data.start_locations.len() > 1
             && self.settings.start_location_settings.mode != StartLocationMode::Custom
         {
-            10
+            100
         } else {
             1
         };
@@ -5484,6 +5523,7 @@ impl<'r> Randomizer<'r> {
             num_attempts_start_location,
             &mut rng,
             &mut traverser_pair,
+            group_first_item_idx,
         )?;
         let mut item_precedence: Vec<Item> = self.get_item_precedence(
             &self.item_priority_groups,
@@ -5501,6 +5541,7 @@ impl<'r> Randomizer<'r> {
             item_precedence,
             start_location: start_location_data.start_location.clone(),
             hub_location: start_location_data.hub_location.clone(),
+            first_item_idx: start_location_data.first_item_idx.clone(),
             item_location_state: vec![
                 initial_item_location_state;
                 self.game_data.item_locations.len()

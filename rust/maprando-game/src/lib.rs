@@ -15,14 +15,20 @@ use json::{self, JsonValue};
 use log::{error, info, warn};
 use ndarray::Array3;
 use num_enum::TryFromPrimitive;
+use pyo3::exceptions::PyValueError;
 use serde::{Deserialize, Serialize};
 use std::borrow::ToOwned;
 use std::fmt::{self, Debug, Formatter};
 use std::fs::File;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use strum::VariantNames;
 use strum_macros::{EnumString, VariantNames};
+
+use pyo3::prelude::*;
+use std::io::Read;
+use std::io::Cursor;
 
 pub const TECH_ID_CAN_WALLJUMP: TechId = 76;
 pub const TECH_ID_CAN_HEAT_RUN: TechId = 6;
@@ -78,6 +84,7 @@ pub const TECH_ID_CAN_TRICKY_CARRY_FLASH_SUIT: TechId = 142;
 pub const TECH_ID_CAN_HYPER_GATE_SHOT: TechId = 10001;
 pub const TECH_ID_CAN_CARRY_BLUE_SUIT: TechId = 215;
 
+#[pyclass]
 #[allow(clippy::type_complexity)]
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Map {
@@ -125,12 +132,21 @@ pub type StepTrailId = i32;
 pub type LinkIdx = i32;
 pub type TraversalId = usize; // Index into Traversal.past_steps
 
+#[pyclass]
 #[derive(Default, Clone)]
+pub struct IndexedVecString {
+    #[pyo3(get)]
+    pub keys: Vec<String>,
+    pub index_by_key: HashMap<String, usize>,
+}
+
+#[derive(Default, Clone, IntoPyObject)]
 pub struct IndexedVec<T: Hash + Eq> {
     pub keys: Vec<T>,
     pub index_by_key: HashMap<T, usize>,
 }
 
+#[pyclass]
 #[derive(
     Copy,
     Clone,
@@ -174,10 +190,15 @@ pub enum Item {
     Nothing,      // 22
     SparkBooster, // 23
     BlueBooster,  // 24
+    ArchipelagoItem, // 25
+    ArchipelagoProgItem, // 26
+    ArchipelagoUsefulItem, // 27
+    ArchipelagoUsefulProgItem, // 28
 }
 
+#[pymethods]
 impl Item {
-    pub fn is_unique(self) -> bool {
+    pub fn is_unique(&self) -> bool {
         ![
             Item::Missile,
             Item::Super,
@@ -185,8 +206,19 @@ impl Item {
             Item::ETank,
             Item::ReserveTank,
             Item::Nothing,
+            Item::ArchipelagoItem,
+            Item::ArchipelagoUsefulItem,
+            Item::ArchipelagoProgItem,
         ]
         .contains(&self)
+    }
+    #[new]
+    pub fn new(value: usize) -> Self {
+        Item::try_from(value).unwrap()
+    }
+
+    pub fn to_int(&self) -> usize {
+        self.to_owned() as usize
     }
 }
 
@@ -1308,9 +1340,9 @@ pub struct TitleScreenData {
     pub map_station: TitleScreenImage,
 }
 
-pub fn read_image(path: &Path) -> Result<Array3<u8>> {
-    let img = ImageReader::open(path)
-        .with_context(|| format!("Unable to open image: {}", path.display()))?
+pub fn read_image(path: &Path, game_data: &GameData) -> Result<Array3<u8>> {
+    let img = ImageReader::new(Cursor::new(game_data.read_to_bytes(path).unwrap()))
+        .with_guessed_format()?
         .decode()
         .with_context(|| format!("Unable to decode image: {}", path.display()))?
         .to_rgb8();
@@ -1550,14 +1582,21 @@ pub struct ExitInfo {
 // more structured; combine maps with the same keys; also maybe unify the room geometry data
 // with sm-json-data and cut back on the amount of different
 // keys/IDs/indexes for rooms, nodes, and doors.
+#[pyclass]
 #[derive(Default, Clone)]
 pub struct GameData {
+    pub apworld_path: Option<String>,
+    cached_mosaic_patches: Vec<u8>,
+    cached_mosaic_patches_map: Option<JsonValue>,
     sm_json_data_path: PathBuf,
+    #[pyo3(get)]
     pub tech_isv: IndexedVec<TechId>,
+    #[pyo3(get)]
     pub notable_isv: IndexedVec<(RoomId, NotableId)>,
     pub notable_info: Vec<NotableInfo>,
     pub flag_isv: IndexedVec<String>,
-    pub item_isv: IndexedVec<String>,
+    #[pyo3(get)]
+    pub item_isv: IndexedVecString,
     weapon_isv: IndexedVec<String>,
     weapon_categories: HashMap<String, Vec<String>>, // map from weapon category to specific weapons with that category
     enemy_attack_damage: HashMap<(String, String), Capacity>,
@@ -1653,13 +1692,17 @@ impl<T: Hash + Eq> IndexedVec<T> {
     }
 }
 
-fn read_json(path: &Path) -> Result<JsonValue> {
-    let file = File::open(path).with_context(|| format!("unable to open {}", path.display()))?;
-    let json_str = std::io::read_to_string(file)
-        .with_context(|| format!("unable to read {}", path.display()))?;
-    let json_data =
-        json::parse(&json_str).with_context(|| format!("unable to parse {}", path.display()))?;
-    Ok(json_data)
+impl IndexedVecString {
+    pub fn add<U: ToOwned<Owned = String> + ?Sized>(&mut self, name: &U) -> usize {
+        if !self.index_by_key.contains_key(&name.to_owned()) {
+            let idx = self.keys.len();
+            self.index_by_key.insert(name.to_owned(), self.keys.len());
+            self.keys.push(name.to_owned());
+            idx
+        } else {
+            self.index_by_key[&name.to_owned()]
+        }
+    }
 }
 
 // TODO: Take steep slopes into account here:
@@ -1689,9 +1732,114 @@ struct RequirementContext<'a> {
     notable_map: Option<&'a HashMap<String, NotableIdx>>,
 }
 
+#[pymethods]
 impl GameData {
+    pub fn get_location_names(&self) -> Vec<String> {
+        let mut item_loc: Vec<String> = Vec::new();
+        for i in 0..self.item_locations.len() {
+            let room_name = self.room_json_map[&self.item_locations[i].0]["name"].to_string();
+            let location_name = self.node_json_map[&self.item_locations[i]]["name"].to_string();
+            item_loc.push(format!("{room_name} {location_name}"));
+        }
+        item_loc
+    }
+
+    pub fn get_location_addresses(&self) -> Vec<usize> {
+        let mut addresses: Vec<usize> = Vec::new();
+        for i in 0..self.item_locations.len() {
+            addresses.push(self.node_ptr_map[&self.item_locations[i]]);
+        }
+        addresses
+    }
+}
+
+impl GameData {
+    pub fn open(&self, path: &Path) -> Box<dyn Read> {
+        match &self.apworld_path {
+            Some(apworldpath) => {
+                let zipfile = std::fs::File::open(Path::new(apworldpath.as_str())).unwrap();
+                let mut archive = zip::ZipArchive::new(zipfile).unwrap();
+                let path_str = path.strip_prefix("worlds/").unwrap().to_str().unwrap().replace("\\", "/");
+                let mut zipped_file = archive.by_name(&path_str).unwrap();
+                let mut buffer = Vec::new();
+                zipped_file.read_to_end(&mut buffer).unwrap();
+                Box::new(Cursor::new(buffer))
+            },
+            None => {
+                Box::new(File::open(path).with_context(|| format!("unable to open {}", path.display())).unwrap())
+            }
+        }
+    }
+
+    pub fn read_to_string(&self, path: &Path) -> Result<String> {
+        match &self.apworld_path {
+            Some(apworldpath) => {
+                let zipfile = std::fs::File::open(Path::new(apworldpath.as_str())).unwrap();
+                let mut archive = zip::ZipArchive::new(zipfile).unwrap();
+                let path_str = path.strip_prefix("worlds/").unwrap().to_str().unwrap().replace("\\", "/");
+                std::io::read_to_string(archive.by_name(path_str.as_str()).unwrap())
+                    .with_context(|| format!("unable to read {}", path_str.as_str()))
+            },
+            None => std::io::read_to_string(File::open(path).with_context(|| format!("unable to open {}", path.display())).unwrap())
+                    .with_context(|| format!("unable to read {}", path.display()))
+        }
+    }
+
+    pub fn read_to_bytes(&self, path: &Path) -> Result<Vec<u8>> {
+        match &self.apworld_path {
+            Some(apworldpath) => {
+                let zipfile = std::fs::File::open(Path::new(apworldpath.as_str())).unwrap();
+                let mut archive = zip::ZipArchive::new(zipfile).unwrap();
+                let path_str = path.strip_prefix("worlds/").unwrap().to_str().unwrap().replace("\\", "/");
+                let mut zip_file = archive.by_name(path_str.as_str()).unwrap();
+                let mut bytes = Vec::with_capacity(zip_file.size() as usize);
+                zip_file.read_to_end(&mut bytes).unwrap();
+                Ok(bytes)
+            },
+            None => Ok(std::fs::read(path)?)
+        }
+    }
+
+    pub fn read_to_bytes_with_cache(&self, path: &str) -> Result<Vec<u8>> {
+        let patches_map = self.cached_mosaic_patches_map.as_ref().unwrap();
+        let entry = &patches_map[path];
+        let offset: usize = entry["offset"].as_usize().expect(&format!("mosaic patches not found with name {:?}", path));
+        let size: usize = entry["size"].as_usize().unwrap();
+        Ok(self.cached_mosaic_patches[offset..(offset+size)].to_vec())
+    }
+
+    pub fn glob_filepaths(&self, glob_pattern: &str, contains_path: &str, extension: &str) -> Vec<PathBuf> {
+        let mut filepaths = vec![];
+        match &self.apworld_path {
+            Some(apworldpath) => {
+                let zipfile = std::fs::File::open(Path::new(apworldpath.as_str())).unwrap();
+                let archive = zip::ZipArchive::new(zipfile).unwrap();
+                for filename in archive.file_names() {
+                    if filename.contains(contains_path) && filename.ends_with(extension) {
+                        filepaths.push(PathBuf::from("worlds/".to_owned() + filename));
+                    }   
+                }
+                filepaths
+            },
+            None => {
+                for entry in glob::glob(glob_pattern).unwrap() {
+                    if entry.as_ref().unwrap().to_str().unwrap().ends_with(extension) {
+                        filepaths.push(PathBuf::from(entry.unwrap().as_path()));
+                    }
+                }
+                filepaths
+            }
+        }
+    }
+
+    fn read_json(&self, path: &Path) -> Result<JsonValue> {
+        let json_str = self.read_to_string(path)?;
+        let json_data = json::parse(&json_str).with_context(|| format!("unable to parse {}", path.display()))?;
+        Ok(json_data)
+    }
+
     fn load_tech(&mut self) -> Result<()> {
-        let full_tech_json = read_json(&self.sm_json_data_path.join("tech.json"))?;
+        let full_tech_json = self.read_json(&self.sm_json_data_path.join("tech.json"))?;
         for tech_category in full_tech_json["techCategories"].members() {
             ensure!(tech_category["techs"].is_array());
             for tech_json in tech_category["techs"].members() {
@@ -1850,10 +1998,16 @@ impl GameData {
     }
 
     fn load_items_and_flags(&mut self) -> Result<()> {
-        let item_json = read_json(&self.sm_json_data_path.join("items.json"))?;
+        let item_json = self.read_json(&self.sm_json_data_path.join("items.json"))?;
 
         for item_name in Item::VARIANTS {
-            self.item_isv.add(&item_name.to_string());
+            let item = Item::from_str(item_name).unwrap();
+            if item != Item::ArchipelagoItem && 
+                item != Item::ArchipelagoProgItem &&
+                item != Item::ArchipelagoUsefulItem && 
+                item != Item::ArchipelagoUsefulProgItem {
+                self.item_isv.add(&item_name.to_string());
+            }
         }
         ensure!(item_json["gameFlags"].is_array());
         for flag_name in item_json["gameFlags"].members() {
@@ -1864,7 +2018,7 @@ impl GameData {
     }
 
     fn load_weapons(&mut self) -> Result<()> {
-        let weapons_json = read_json(&self.sm_json_data_path.join("weapons/main.json"))?;
+        let weapons_json = self.read_json(&self.sm_json_data_path.join("weapons/main.json"))?;
         ensure!(weapons_json["weapons"].is_array());
         for weapon_json in weapons_json["weapons"].members() {
             let name = weapon_json["name"].as_str().unwrap();
@@ -1899,7 +2053,7 @@ impl GameData {
 
     fn load_enemies(&mut self) -> Result<()> {
         for file in ["main.json", "bosses/main.json"] {
-            let enemies_json = read_json(&self.sm_json_data_path.join("enemies").join(file))?;
+            let enemies_json = self.read_json(&self.sm_json_data_path.join("enemies").join(file))?;
             ensure!(enemies_json["enemies"].is_array());
             for enemy_json in enemies_json["enemies"].members() {
                 let enemy_name = enemy_json["name"].as_str().unwrap();
@@ -1993,7 +2147,7 @@ impl GameData {
     }
 
     fn load_numerics(&mut self) -> Result<()> {
-        let numerics_json = read_json(&self.sm_json_data_path.join("numerics.json"))?;
+        let numerics_json = self.read_json(&self.sm_json_data_path.join("numerics.json"))?;
         ensure!(numerics_json["numericCategories"].is_array());
         for category_json in numerics_json["numericCategories"].members() {
             let category = category_json["name"].as_str().unwrap();
@@ -2032,7 +2186,7 @@ impl GameData {
     }
 
     fn load_helpers(&mut self) -> Result<()> {
-        let helpers_json = read_json(&self.sm_json_data_path.join("helpers.json"))?;
+        let helpers_json = self.read_json(&self.sm_json_data_path.join("helpers.json"))?;
         ensure!(helpers_json["helperCategories"].is_array());
 
         for (category_idx, category_json) in helpers_json["helperCategories"].members().enumerate()
@@ -3098,20 +3252,16 @@ impl GameData {
 
     pub fn load_rooms(&mut self, room_pattern: &str) -> Result<()> {
         let mut room_json_map: HashMap<usize, JsonValue> = HashMap::new();
-        for entry in glob::glob(room_pattern).unwrap() {
-            if let Ok(path) = entry {
-                let path_str = path.to_str().with_context(|| {
-                    format!("Unable to convert path to string: {}", path.display())
-                })?;
-                if path_str.contains("ceres") || path_str.contains("roomDiagrams") {
-                    continue;
-                }
-
-                let room_json = read_json(&path)?;
-                room_json_map.insert(room_json["id"].as_usize().unwrap(), room_json);
-            } else {
-                bail!("Error processing region path: {}", entry.err().unwrap());
+        for path in self.glob_filepaths(room_pattern, "/region/", "json") {
+            let path_str = path.to_str().with_context(|| {
+                format!("Unable to convert path to string: {}", path.display())
+            })?;
+            if path_str.contains("ceres") || path_str.contains("roomDiagrams") {
+                continue;
             }
+
+            let room_json = self.read_json(&path)?;
+            room_json_map.insert(room_json["id"].as_usize().unwrap(), room_json);
         }
 
         let mut room_id_vec: Vec<usize> = room_json_map.keys().cloned().collect();
@@ -4715,13 +4865,9 @@ impl GameData {
     fn load_connections(&mut self) -> Result<()> {
         let connection_pattern =
             self.sm_json_data_path.to_str().unwrap().to_string() + "/connection/**/*.json";
-        for entry in glob::glob(&connection_pattern)? {
-            if let Ok(path) = entry {
-                if !path.to_str().unwrap().contains("ceres") {
-                    self.process_connections(&read_json(&path)?)?;
-                }
-            } else {
-                bail!("Error processing connection path: {}", entry.err().unwrap());
+        for path in self.glob_filepaths(&connection_pattern, "/connection/", "json") {
+            if !path.to_str().unwrap().contains("ceres") {
+                self.process_connections(&self.read_json(&path)?)?;
             }
         }
         Ok(())
@@ -4910,7 +5056,7 @@ impl GameData {
     }
 
     fn load_escape_timings(&mut self, path: &Path) -> Result<()> {
-        let escape_timings_str = std::fs::read_to_string(path)
+        let escape_timings_str = self.read_to_string(path)
             .with_context(|| format!("Unable to load escape timings at {}", path.display()))?;
         let escape_timing_data: EscapeTimingData = serde_json::from_str(&escape_timings_str)?;
         self.escape_timings = escape_timing_data.rooms;
@@ -4919,7 +5065,7 @@ impl GameData {
     }
 
     fn load_start_locations(&mut self, path: &Path) -> Result<()> {
-        let start_locations_str = std::fs::read_to_string(path)
+        let start_locations_str = self.read_to_string(path)
             .with_context(|| format!("Unable to load start locations at {}", path.display()))?;
         let mut start_locations: Vec<StartLocation> = serde_json::from_str(&start_locations_str)?;
         let mut start_location_id_map: HashMap<(usize, usize), usize> = HashMap::new();
@@ -5008,7 +5154,7 @@ impl GameData {
     }
 
     fn load_room_geometry(&mut self, path: &Path) -> Result<()> {
-        let room_geometry_str = std::fs::read_to_string(path)
+        let room_geometry_str = self.read_to_string(path)
             .with_context(|| format!("Unable to load room geometry at {}", path.display()))?;
         let room_geometry: Vec<RoomGeometry> = serde_json::from_str(&room_geometry_str)?;
         for (room_idx, room) in room_geometry.iter().enumerate() {
@@ -5207,16 +5353,10 @@ impl GameData {
 
     pub fn load_title_screens(&mut self, path: &Path) -> Result<()> {
         info!("Loading title screens");
-        let file_it = path.read_dir().with_context(|| {
-            format!(
-                "Unable to read title screen directory at {}",
-                path.display()
-            )
-        })?;
-        for file in file_it {
-            let file = file?;
-            let filename = file.file_name().into_string().unwrap();
-            let img = read_image(&file.path())?;
+        let files = self.glob_filepaths(path.join("*.png").to_str().unwrap(), path.strip_prefix("worlds/").unwrap_or(path).to_str().unwrap(), "png");
+        for file in files {
+            let filename = file.file_name().unwrap().to_str().unwrap();
+            let img = read_image(file.as_path(), self)?;
 
             if filename.starts_with("TL") {
                 self.title_screen_data.top_left.push(img);
@@ -5234,7 +5374,7 @@ impl GameData {
     }
 
     pub fn load_room_name_font(&mut self, path: &Path) -> Result<()> {
-        let img = read_image(path)?;
+        let img = read_image(path, self)?;
         let dim = img.dim();
         let char_map = [
             "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -5288,7 +5428,7 @@ impl GameData {
     }
 
     fn load_reduced_flashing_patch(&mut self, path: &Path) -> Result<()> {
-        let reduced_flashing_str = std::fs::read_to_string(path).with_context(|| {
+        let reduced_flashing_str = self.read_to_string(path).with_context(|| {
             format!(
                 "Unable to load reduced flashing patch at {}",
                 path.display()
@@ -5299,7 +5439,7 @@ impl GameData {
     }
 
     fn load_strat_videos(&mut self, path: &Path) -> Result<()> {
-        let strat_videos_str = std::fs::read_to_string(path)
+        let strat_videos_str = self.read_to_string(path)
             .with_context(|| format!("Unable to load strat videos at {}", path.display()))?;
         let strat_videos: Vec<StratVideo> = serde_json::from_str(&strat_videos_str)?;
         for video in strat_videos {
@@ -5310,9 +5450,8 @@ impl GameData {
         }
         Ok(())
     }
-
     fn load_map_tile_data(&mut self, path: &Path) -> Result<()> {
-        let map_tile_data_str = std::fs::read_to_string(path)
+        let map_tile_data_str = self.read_to_string(path)
             .with_context(|| format!("Unable to load map tile data at {}", path.display()))?;
         let map_tile_data_file: MapTileDataFile = serde_json::from_str(&map_tile_data_str)?;
         self.map_tile_data = map_tile_data_file.rooms;
@@ -5383,9 +5522,16 @@ impl GameData {
     }
 
     pub fn load_minimal(base_path: &Path) -> Result<GameData> {
-        let sm_json_data_path = base_path.join("../sm-json-data");
+        Self::load_minimal_from(&base_path.join("../sm-json-data"), None)
+    }
+
+    fn load_minimal_from(
+        sm_json_data_path: &Path,
+        apworld_path: Option<String>,
+    ) -> Result<GameData> {
         let mut game_data = GameData {
-            sm_json_data_path,
+            apworld_path,
+            sm_json_data_path: sm_json_data_path.to_owned(),
             ..GameData::default()
         };
 
@@ -5413,8 +5559,62 @@ impl GameData {
 
         game_data.load_reduced_flashing_patch(&reduced_flashing_path)?;
         game_data.load_strat_videos(&strat_videos_path)?;
+        game_data.load_rest(
+            &room_geometry_path,
+            &escape_timings_path,
+            &start_locations_path,
+            &title_screen_path,
+            &room_name_font_path,
+            &map_tile_path,
+        )?;
+        Ok(game_data)
+    }
 
-        game_data.area_order = vec![
+    // AP: paths are resolved inside the apworld zip when apworld_path is set.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_ap(
+        sm_json_data_path: &Path,
+        room_geometry_path: &Path,
+        escape_timings_path: &Path,
+        start_locations_path: &Path,
+        title_screen_path: &Path,
+        reduced_flashing_path: &Path,
+        map_tile_path: &Path,
+        room_name_font_path: &Path,
+        apworld_path: Option<String>,
+    ) -> Result<GameData> {
+        let mut game_data = Self::load_minimal_from(sm_json_data_path, apworld_path)?;
+        // All Mosaic bps files are packed into a single file to speed up IO with zipfile, cached here
+        let mosaic_patches_path =
+            Path::new("worlds/sm_map_rando/data/patches/mosaic/mosaic_patches.data");
+        let mosaic_patches_map_path =
+            Path::new("worlds/sm_map_rando/data/patches/mosaic/mosaic_patches_map.json");
+        game_data.cached_mosaic_patches = game_data.read_to_bytes(mosaic_patches_path)?;
+        game_data.cached_mosaic_patches_map = Some(game_data.read_json(mosaic_patches_map_path)?);
+
+        game_data.load_reduced_flashing_patch(reduced_flashing_path)?;
+        game_data.load_rest(
+            room_geometry_path,
+            escape_timings_path,
+            start_locations_path,
+            title_screen_path,
+            room_name_font_path,
+            map_tile_path,
+        )?;
+        Ok(game_data)
+    }
+
+    fn load_rest(
+        &mut self,
+        room_geometry_path: &Path,
+        escape_timings_path: &Path,
+        start_locations_path: &Path,
+        title_screen_path: &Path,
+        room_name_font_path: &Path,
+        map_tile_path: &Path,
+    ) -> Result<()> {
+
+        self.area_order = vec![
             "Central Crateria",
             "West Crateria",
             "East Crateria",
@@ -5440,20 +5640,20 @@ impl GameData {
         .collect();
 
         let room_pattern =
-            game_data.sm_json_data_path.to_str().unwrap().to_string() + "/region/**/*.json";
-        game_data.load_rooms(&room_pattern)?;
-        game_data.load_connections()?;
-        game_data.extract_all_tech_dependencies()?;
-        game_data.extract_all_strat_dependencies()?;
+            self.sm_json_data_path.to_str().unwrap().to_string() + "/region/**/*.json";
+        self.load_rooms(&room_pattern)?;
+        self.load_connections()?;
+        self.extract_all_tech_dependencies()?;
+        self.extract_all_strat_dependencies()?;
 
-        game_data
-            .load_room_geometry(&room_geometry_path)
+        self
+            .load_room_geometry(room_geometry_path)
             .context("Unable to load room geometry")?;
-        game_data.load_escape_timings(&escape_timings_path)?;
-        game_data.load_start_locations(&start_locations_path)?;
-        game_data.load_hub_locations()?;
-        game_data.load_map_tile_data(&map_tile_path)?;
-        game_data.area_names = vec![
+        self.load_escape_timings(escape_timings_path)?;
+        self.load_start_locations(start_locations_path)?;
+        self.load_hub_locations()?;
+        self.load_map_tile_data(map_tile_path)?;
+        self.area_names = vec![
             "Crateria",
             "Brinstar",
             "Norfair",
@@ -5464,7 +5664,7 @@ impl GameData {
         .into_iter()
         .map(|x| x.to_owned())
         .collect();
-        game_data.area_map_ptrs = vec![
+        self.area_map_ptrs = vec![
             0x1A9000, // Crateria
             0x1A8000, // Brinstar
             0x1AA000, // Norfair
@@ -5472,14 +5672,14 @@ impl GameData {
             0x1AC000, // Maridia
             0x1AD000, // Tourian
         ];
-        game_data.load_title_screens(&title_screen_path)?;
-        game_data.load_room_name_font(&room_name_font_path)?;
+        self.load_title_screens(title_screen_path)?;
+        self.load_room_name_font(room_name_font_path)?;
 
-        // for link in &game_data.links {
+        // for link in &self.links {
         //     let from_vertex_id = link.from_vertex_id;
-        //     let from_vertex_key = &game_data.vertex_isv.keys[from_vertex_id];
+        //     let from_vertex_key = &self.vertex_isv.keys[from_vertex_id];
         //     let to_vertex_id = link.to_vertex_id;
-        //     let to_vertex_key = &game_data.vertex_isv.keys[to_vertex_id];
+        //     let to_vertex_key = &self.vertex_isv.keys[to_vertex_id];
         //     if (from_vertex_key.room_id, from_vertex_key.node_id) == (44, 12)
         //         && (to_vertex_key.room_id, to_vertex_key.node_id) == (44, 12)
         //     {
@@ -5492,7 +5692,7 @@ impl GameData {
 
         // List the longest node names:
         // let mut node_names: Vec<String> = vec![];
-        // for node in game_data.node_json_map.values() {
+        // for node in self.node_json_map.values() {
         //     node_names.push(node["name"].as_str().unwrap().to_string());
         // }
         // node_names.sort_by_key(|x| -(x.len() as isize));
@@ -5500,7 +5700,7 @@ impl GameData {
         //     println!("{}", name);
         // }
 
-        Ok(game_data)
+        Ok(())
     }
 }
 

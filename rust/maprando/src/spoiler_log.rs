@@ -6,6 +6,7 @@ use maprando_game::{
     StepTrailId, TraversalId, VertexId, VertexKey,
 };
 use maprando_logic::{GlobalState, LocalState};
+use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 use strum::VariantNames;
 
@@ -97,21 +98,27 @@ pub fn get_spoiler_traversal(tr: &Traverser) -> SpoilerTraversal {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerDetails {
+    #[pyo3(get)]
     pub step: usize,
     pub start_state: SpoilerStartState,
     pub flags: Vec<SpoilerFlagDetails>,
     pub doors: Vec<SpoilerDoorDetails>,
+    #[pyo3(get)]
     pub items: Vec<SpoilerItemDetails>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerItemLoc {
+    #[pyo3(get)]
     pub item: String,
     pub location: SpoilerLocation,
 }
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerRoomLoc {
     // here temporarily, most likely, since these can be baked into the web UI
     pub room_id: usize,
@@ -122,33 +129,41 @@ pub struct SpoilerRoomLoc {
     pub coords: (usize, usize),
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerItemSummary {
+    #[pyo3(get)]
     pub item: String,
+    #[pyo3(get)]
     pub location: SpoilerLocation,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerFlagSummary {
     flag: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerDoorSummary {
     door_type: String,
     location: SpoilerLocation,
     direction: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerSummary {
+    #[pyo3(get)]
     pub step: usize,
     pub flags: Vec<SpoilerFlagSummary>,
     pub doors: Vec<SpoilerDoorSummary>,
+    #[pyo3(get)]
     pub items: Vec<SpoilerItemSummary>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerLink {
     pub from_vertex_id: VertexId,
     pub to_vertex_id: VertexId,
@@ -156,20 +171,20 @@ pub struct SpoilerLink {
     pub strat_name: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerRoom {
     pub room_id: usize,
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerNode {
     pub room_id: usize,
     pub node_id: usize,
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerGameData {
     rooms: Vec<SpoilerRoom>,
     nodes: Vec<SpoilerNode>,
@@ -177,14 +192,14 @@ pub struct SpoilerGameData {
     links: Vec<SpoilerLink>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerTraversalStep {
     pub step_num: usize,
     pub updated_vertex_ids: Vec<VertexId>,
     pub updated_start_trail_ids: Vec<[StepTrailId; NUM_COST_METRICS]>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerTraversal {
     pub initial_local_state: SpoilerLocalState,
     pub prev_trail_ids: Vec<StepTrailId>,
@@ -193,9 +208,11 @@ pub struct SpoilerTraversal {
     pub steps: Vec<SpoilerTraversalStep>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerLog {
     pub item_priority: Vec<String>,
+    #[pyo3(get)]
     pub summary: Vec<SpoilerSummary>,
     pub objectives: Vec<String>,
     pub escape: SpoilerEscape,
@@ -203,7 +220,9 @@ pub struct SpoilerLog {
     pub hub_location_name: String,
     pub hub_obtain_route: Vec<SpoilerRouteEntry>,
     pub hub_return_route: Vec<SpoilerRouteEntry>,
+    #[pyo3(get)]
     pub details: Vec<SpoilerDetails>,
+    #[pyo3(get)]
     pub all_items: Vec<SpoilerItemLoc>,
     pub all_rooms: Vec<SpoilerRoomLoc>,
     pub game_data: SpoilerGameData,
@@ -213,6 +232,7 @@ pub struct SpoilerLog {
 
 // Spoiler log ---------------------------------------------------------
 
+#[pyclass]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SpoilerRouteEntry {
     pub area: String,
@@ -248,17 +268,22 @@ pub struct SpoilerRouteEntry {
     pub relevant_flags: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerLocation {
+    #[pyo3(get)]
     pub area: String,
     pub room_id: usize,
+    #[pyo3(get)]
     pub room: String,
     pub node_id: usize,
+    #[pyo3(get)]
     pub node: String,
     pub coords: (usize, usize),
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerStartLocation {
     pub name: String,
     pub room_id: usize,
@@ -267,7 +292,8 @@ pub struct SpoilerStartLocation {
     pub y: f32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerStartState {
     max_energy: Capacity,
     max_reserves: Capacity,
@@ -281,17 +307,22 @@ pub struct SpoilerStartState {
     flags: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerItemDetails {
+    #[pyo3(get)]
     pub item: String,
+    #[pyo3(get)]
     pub location: SpoilerLocation,
+    #[pyo3(get)]
     pub reachable_step: usize,
     pub difficulty: Option<String>,
     pub obtain_route: Vec<SpoilerRouteEntry>,
     pub return_route: Vec<SpoilerRouteEntry>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerFlagDetails {
     pub flag: String,
     pub location: SpoilerLocation,
@@ -300,7 +331,8 @@ pub struct SpoilerFlagDetails {
     pub return_route: Vec<SpoilerRouteEntry>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[pyclass]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SpoilerDoorDetails {
     door_type: String,
     direction: String,
